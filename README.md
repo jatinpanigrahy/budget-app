@@ -7,6 +7,8 @@ A minimal, responsive web application built to track personal finances, manage c
 
 > ![App Preview](assets/1.png)
 
+**🔗 [View Live Application](https://jatinp-budget.streamlit.app/)**
+
 ## Core Features
 
 - **Category Management:** Dynamically create and manage custom financial categories.
@@ -19,3 +21,8 @@ A minimal, responsive web application built to track personal finances, manage c
 - **Python** (Object-oriented financial ledger logic)
 - **Streamlit** (Interactive web UI and session state management)
 - **Pandas & Altair** (Data structuring and analytical rendering)
+
+## Deployment
+This application is deployed via Streamlit Community Cloud.
+
+**Live Application:** https://jatinp-budget.streamlit.app/
