@@ -1,10 +1,8 @@
 import streamlit as st
 import pandas as pd
+import altair as alt
 
 
-# ==========================================
-# CORE LOGIC
-# ==========================================
 class Category:
     def __init__(self, name):
         self.name = name
@@ -22,134 +20,304 @@ class Category:
     def get_balance(self):
         return sum(entry["amount"] for entry in self.ledger)
 
+    def transfer(self, amount, receiver):
+        if self.withdraw(amount, f"Transfer to {receiver.name}"):
+            receiver.deposit(amount, f"Transfer from {self.name}")
+            return True
+        return False
+
     def check_funds(self, amount):
         return float(amount) <= self.get_balance()
 
 
-# ==========================================
-# MEMORY & SETUP
-# ==========================================
 st.set_page_config(page_title="Budget App", layout="wide")
 
-# Set active user
-if "current_user" not in st.session_state:
-    st.session_state.current_user = "Default Account"
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif !important;
+        font-weight: 400;
+        letter-spacing: -0.01em;
+    }
+    
+    [data-testid="stElementToolbar"], footer, header {
+        display: none !important;
+    }
+    
+    .stApp {
+        background-color: #0d1117;
+        color: #c9d1d9;
+    }
 
-# Setup the primary database structure: { "Username": { "CategoryName": CategoryObject } }
-if "database" not in st.session_state:
-    st.session_state.database = {}
+    .stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"] {
+        background-color: #161b22 !important;
+        border: 1px solid #30363d !important;
+        color: #e6edf3 !important;
+        border-radius: 6px !important;
+    }
 
+    div.stButton > button {
+        background-color: #1f6feb !important;
+        color: white !important;
+        border: 1px solid rgba(240, 246, 252, 0.1) !important;
+        border-radius: 6px !important;
+        font-weight: 500 !important;
+        transition: all 0.2s ease;
+    }
+    
+    div.stButton > button:hover {
+        background-color: #388bfd !important;
+        border-color: #8b949e !important;
+    }
 
-# Initialize default data for any new user
-def initialize_user(username):
-    if username not in st.session_state.database:
-        st.session_state.database[username] = {
-            "Food": Category("Food"),
-            "Housing": Category("Housing"),
-            "Transport": Category("Transport"),
-        }
+    [data-testid="stMetricValue"] {
+        font-size: 2.4rem !important;
+        font-weight: 600 !important;
+        color: #58a6ff !important;
+    }
+    
+    [data-testid="stMetricLabel"] {
+        font-size: 0.85rem !important;
+        color: #8b949e !important;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
 
+    [data-testid="stTable"] {
+        background-color: #161b22;
+        border-radius: 6px;
+        overflow: hidden;
+        border: 1px solid #30363d;
+    }
+    
+    [data-testid="stTable"] th {
+        background-color: #0d1117 !important;
+        color: #8b949e !important;
+        border-bottom: 1px solid #30363d !important;
+        font-weight: 500;
+    }
+    
+    [data-testid="stTable"] td {
+        border-bottom: 1px solid #21262d !important;
+        color: #c9d1d9;
+    }
+    
+    [data-testid="stExpander"] {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-initialize_user(st.session_state.current_user)
+if "categories" not in st.session_state:
+    st.session_state.categories = {
+        "Food": Category("Food"),
+        "Housing": Category("Housing"),
+        "Transport": Category("Transport"),
+    }
 
-# Shortcut variable for the active user's data
-active_data = st.session_state.database[st.session_state.current_user]
+if "focus_category" not in st.session_state:
+    st.session_state.focus_category = None
 
-# ==========================================
-# UI: HEADER & SETTINGS
-# ==========================================
+active_data = st.session_state.categories
+
 st.title("Budget App")
+st.markdown("""
+A minimal application to track financial deposits, withdrawals, and inter-category transfers.
 
-with st.expander("How to use this app"):
-    st.markdown("""
-    1. **Add Categories:** Create custom categories for your expenses.
-    2. **Log Transactions:** Deposit funds or record withdrawals.
-    3. **Track Balances:** The dashboard updates automatically to show your remaining funds and spending habits.
-    *Note: Changing the account name below acts like switching user profiles.*
-    """)
-
-col_user, _ = st.columns([1, 3])
-with col_user:
-    new_user = st.text_input("Active Account", value=st.session_state.current_user)
-    if new_user != st.session_state.current_user and new_user.strip() != "":
-        st.session_state.current_user = new_user.strip()
-        initialize_user(st.session_state.current_user)
-        st.rerun()
-
+**Quick Start:** Use the default categories, or create your own below to begin tracking your finances.
+""")
 st.divider()
 
-# ==========================================
-# UI: MAIN DASHBOARD
-# ==========================================
-col_transact, col_data = st.columns([1, 2])
+col_transact, col_data = st.columns([1, 1.5])
 
 with col_transact:
-    st.subheader("Manage Funds")
-
-    # NEW UI: Dedicated Category Creation
-    new_cat = st.text_input("Create New Category", placeholder="e.g. Subscriptions")
-    if st.button("Add Category"):
-        clean_name = new_cat.strip()
-        if clean_name and clean_name not in active_data:
-            active_data[clean_name] = Category(clean_name)
-            st.success(f"Added {clean_name}")
-            st.rerun()
-        elif clean_name in active_data:
-            st.error("Category already exists.")
+    st.subheader("Create Categories")
+    col_cat_input, col_cat_btn = st.columns([3, 1])
+    with col_cat_input:
+        new_cat = st.text_input(
+            "Name", placeholder="e.g. Subscriptions", label_visibility="collapsed"
+        ).strip()
+    with col_cat_btn:
+        if st.button("Add", use_container_width=True):
+            if new_cat and new_cat not in active_data:
+                active_data[new_cat] = Category(new_cat)
+                st.session_state.focus_category = new_cat
+                st.success("Added.")
+                st.rerun()
+            elif new_cat in active_data:
+                st.error("Exists.")
 
     st.markdown("---")
+    st.subheader("Transactions")
 
-    # Transaction Execution
     cat_options = list(active_data.keys())
     if not cat_options:
-        st.warning("Please add a category first.")
+        st.warning("Create a category first.")
     else:
-        selected_cat = st.selectbox("Select Category", cat_options)
-        action = st.radio("Action", ["Deposit", "Withdraw"], horizontal=True)
-        amount = st.number_input("Amount ($)", min_value=0.01, step=10.0, format="%.2f")
-        desc = st.text_input("Description (Optional)")
+        # Dynamic Index Resolution
+        default_index = 0
+        if st.session_state.focus_category in cat_options:
+            default_index = cat_options.index(st.session_state.focus_category)
+
+        selected_cat = st.selectbox("Source Category", cat_options, index=default_index)
+        action = st.radio("Type", ["Deposit", "Withdraw", "Transfer"], horizontal=True)
+
+        target_cat = None
+        if action == "Transfer":
+            target_options = [cat for cat in cat_options if cat != selected_cat]
+            if not target_options:
+                st.warning("Requires a second category for transfer.")
+            else:
+                target_cat = st.selectbox("Target Category", target_options)
+
+        amount = st.number_input("Amount (₹)", value=1.0, step=100.0, format="%.2f")
+
+        if action in ["Deposit", "Withdraw"]:
+            desc = st.text_input("Description (Optional)")
+        else:
+            desc = ""
 
         if st.button("Submit"):
-            cat_obj = active_data[selected_cat]
-            if action == "Deposit":
-                cat_obj.deposit(amount, desc)
-                st.success("Deposit logged.")
-                st.rerun()
-            elif action == "Withdraw":
-                if cat_obj.withdraw(amount, desc):
-                    st.success("Withdrawal logged.")
+            if amount <= 0:
+                st.error(
+                    "Execution blocked: Amount must be strictly greater than zero."
+                )
+            else:
+                cat_obj = active_data[selected_cat]
+                st.session_state.focus_category = selected_cat
+
+                if action == "Deposit":
+                    cat_obj.deposit(amount, desc)
+                    st.success("Deposited.")
                     st.rerun()
-                else:
-                    st.error("Insufficient funds in this category.")
+
+                elif action == "Withdraw":
+                    if cat_obj.withdraw(amount, desc):
+                        st.success("Withdrawn.")
+                        st.rerun()
+                    else:
+                        st.error("Insufficient funds.")
+
+                elif action == "Transfer":
+                    if not target_cat:
+                        st.error("Target missing.")
+                    else:
+                        receiver_obj = active_data[target_cat]
+                        if cat_obj.transfer(amount, receiver_obj):
+                            st.success("Transferred.")
+                            st.rerun()
+                        else:
+                            st.error("Insufficient funds.")
 
 with col_data:
     st.subheader("Overview")
 
-    # Force table to render even if data is zero
-    balance_data = []
-    withdrawal_data = []
+    active_categories = {
+        name: cat for name, cat in active_data.items() if len(cat.ledger) > 0
+    }
 
-    for name, cat_obj in active_data.items():
-        bal = cat_obj.get_balance()
-        balance_data.append({"Category": name, "Balance ($)": f"{bal:.2f}"})
-
-        # Calculate spending for the chart
-        spent = sum(
-            abs(entry["amount"]) for entry in cat_obj.ledger if entry["amount"] < 0
+    if not active_categories:
+        st.info("No data yet. Log a transaction to view the overview.")
+    else:
+        # Algorithmic Sorting: Extract Top 4 by Balance
+        sorted_cats = sorted(
+            active_categories.items(), key=lambda x: x[1].get_balance(), reverse=True
         )
-        if spent > 0:
-            withdrawal_data.append({"Category": name, "Amount Spent": spent})
+        display_names = [name for name, _ in sorted_cats][:4]
 
-    # Render Table
-    if balance_data:
-        df_balances = pd.DataFrame(balance_data)
-        st.dataframe(df_balances, use_container_width=True, hide_index=True)
-    else:
-        st.info("No categories available.")
+        metric_cols = st.columns(len(display_names))
+        for index, name in enumerate(display_names):
+            with metric_cols[index]:
+                st.metric(
+                    label=name, value=f"₹{active_categories[name].get_balance():.2f}"
+                )
 
-    st.subheader("Spending Chart")
-    if withdrawal_data:
-        df_spent = pd.DataFrame(withdrawal_data).set_index("Category")
-        st.bar_chart(df_spent)
-    else:
-        st.caption("Chart will populate once withdrawals are logged.")
+        audit_trail = []
+        for name, cat in active_categories.items():
+            for entry in cat.ledger:
+                amt = entry["amount"]
+                sign = "+" if amt > 0 else "\u2212"
+                formatted_amount = f"{sign}\u00a0₹{abs(amt):.2f}"
+
+                audit_trail.append(
+                    {
+                        "Category": name,
+                        "Type": "Deposit" if amt > 0 else "Withdrawal",
+                        "Amount": formatted_amount,
+                        "Description": entry["description"]
+                        if entry["description"].strip() != ""
+                        else "N/A",
+                    }
+                )
+
+        with st.expander("Transaction Log", expanded=True):
+            if audit_trail:
+                st.table(audit_trail[::-1])
+            else:
+                st.info("Log empty.")
+
+        withdrawal_data = {}
+        total_spent = 0
+        for name, cat in active_categories.items():
+            spent = sum(
+                abs(entry["amount"]) for entry in cat.ledger if entry["amount"] < 0
+            )
+            if spent > 0:
+                withdrawal_data[name] = spent
+                total_spent += spent
+
+        if withdrawal_data and total_spent > 0:
+            st.subheader("Relative Spending Chart")
+
+            pct_data = [
+                {"Category": k, "Percentage": (v / total_spent) * 100}
+                for k, v in withdrawal_data.items()
+            ]
+            df_chart = pd.DataFrame(pct_data)
+
+            chart = (
+                alt.Chart(df_chart)
+                .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
+                .encode(
+                    x=alt.X(
+                        "Category:N",
+                        axis=alt.Axis(
+                            labelAngle=0,
+                            labelFont="Inter",
+                            titleFont="Inter",
+                            labelColor="#8b949e",
+                            titleColor="#8b949e",
+                        ),
+                    ),
+                    y=alt.Y(
+                        "Percentage:Q",
+                        scale=alt.Scale(domain=[0, 100]),
+                        title="Percentage of Total Spent (%)",
+                        axis=alt.Axis(
+                            labelFont="Inter",
+                            titleFont="Inter",
+                            labelColor="#8b949e",
+                            titleColor="#8b949e",
+                        ),
+                    ),
+                    tooltip=["Category", alt.Tooltip("Percentage:Q", format=".1f")],
+                    color=alt.value("#58a6ff"),
+                )
+                .properties(height=350, background="transparent")
+            )
+
+            chart = chart.configure_axis(
+                labelFont="Inter",
+                titleFont="Inter",
+                gridColor="#30363d",
+                domainColor="#30363d",
+            ).configure_view(strokeWidth=0)
+
+            st.altair_chart(chart, use_container_width=True)
