@@ -5,7 +5,7 @@ A minimal, responsive web application built to track personal finances, manage c
 ## Preview
 
 
-> ![App Preview](assets\1.png)
+> ![App Preview](.\assets\1.png)
 
 ## Core Features
 
