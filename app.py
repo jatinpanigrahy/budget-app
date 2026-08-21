@@ -30,7 +30,9 @@ class Category:
         return float(amount) <= self.get_balance()
 
 
-st.set_page_config(page_title="Budget App", layout="wide")
+st.set_page_config(
+    page_title="Budget App", page_icon="assets/favicon.svg", layout="wide"
+)
 
 st.markdown(
     """
